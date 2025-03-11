@@ -1,5 +1,5 @@
 [workspace]
 
-members = ["basic-applet"]
+members = ["basic-applet", "basics", "copy_types", "shadow"]
 
 resolver = "2"
