@@ -3,10 +3,10 @@ use cosmic::app::Core;
 use cosmic::iced::{
     platform_specific::shell::commands::popup::{destroy_popup, get_popup},
     window::Id,
-    Limits, Task,
+    Limits,
 };
 use cosmic::iced_runtime::core::window;
-use cosmic::Element;
+use cosmic::{Action, Element, Task};
 
 // Widgets we're going to use
 use cosmic::widget::{list_column, settings, text, toggler};
@@ -63,10 +63,10 @@ impl cosmic::Application for Window {
     // Initialize the applet
     /*
      *  The parameters are the Core and flags (again not sure what to do with these).
-     *  The function returns our model struct initialized and an Option<Task>, in this case
-     *  there is no command so it returns a None value with the type of Task in its place.
+     *  The function returns our model struct initialized and an Option<Task<Action<Self::Message>>>,
+     *  in this case there is no command so it returns a None value with the type of Task in its place.
      */
-    fn init(core: Core, _flags: Self::Flags) -> (Self, Task<cosmic::app::Message<Self::Message>>) {
+    fn init(core: Core, _flags: Self::Flags) -> (Self, Task<Action<Self::Message>>) {
         let window = Window {
             core,                 // Set the incoming core
             is_enabled: false,    // Set out isEnabled field to false to start disabled
@@ -84,7 +84,7 @@ impl cosmic::Application for Window {
 
     // Here is the update function, it's the one that handles all of the messages that
     // are passed within the applet.
-    fn update(&mut self, message: Self::Message) -> Task<cosmic::app::Message<Self::Message>> {
+    fn update(&mut self, message: Message) -> Task<Action<Self::Message>> {
         // match on what message was sent
         match message {
             // Handle the TogglePopup message
@@ -130,7 +130,7 @@ impl cosmic::Application for Window {
      *  secondary view function (view_window) that shows the widgets in the popup when it's
      *  opened.
      */
-    fn view(&self) -> Element<Self::Message> {
+    fn view(&self) -> Element<Message> {
         self.core
             .applet
             .icon_button("display-symbolic") // Using a default button image
@@ -139,7 +139,7 @@ impl cosmic::Application for Window {
     }
 
     // The actual GUI window for the applet. It's a popup.
-    fn view_window(&self, _id: Id) -> Element<Self::Message> {
+    fn view_window(&self, _id: Id) -> Element<Message> {
         // A text box to show if we've enabled or disabled anything in the model
         let content_list = list_column()
             .padding(5)
