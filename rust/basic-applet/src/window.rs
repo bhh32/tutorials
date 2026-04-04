@@ -1,102 +1,113 @@
-// Mandatory COSMIC imports
-use cosmic::app::Core;
-use cosmic::iced::{
-    platform_specific::shell::commands::popup::{destroy_popup, get_popup},
-    window::Id,
-    Limits, Task,
+// Consolidated COSMIC/iced imports following the current applet patterns.
+//
+// Key changes from the pre-iced-0.14 version:
+//   - Popup commands moved to: platform_specific::shell::wayland::commands::popup
+//   - The `window` module comes from cosmic::iced::window (not iced_runtime::core)
+//   - Task and Element are re-exported directly from the `cosmic` crate
+//   - Element now carries a lifetime parameter: Element<'_, Message>
+//   - The update/init return type is now app::Task<Self::Message>
+use cosmic::{
+    app::Core,
+    iced::{
+        self,
+        platform_specific::shell::wayland::commands::popup::{destroy_popup, get_popup},
+        window, Limits,
+    },
+    // Task and Element are re-exported at the cosmic crate root
+    Element, Task, app,
+    widget::{list_column, settings, text, toggler},
 };
-use cosmic::iced_runtime::core::window;
-use cosmic::Element;
 
-// Widgets we're going to use
-use cosmic::widget::{list_column, settings, text, toggler};
-
-// Every COSMIC Application and Applet MUST have an ID
+// Every COSMIC Application and Applet MUST have an ID.
 const ID: &str = "com.example.BasicApplet";
 
-/*
-*  Every COSMIC model must be a struct data type.
-*  Mandatory fields for a COSMIC Applet are core and popup.
-*  Core is the core settings that allow it to interact with COSMIC
-*  and popup, as you'll see later, is the field that allows us to open
-*  and close the applet.
-*
-*  Next we have our custom field that we will manipulate the value of based
-*  on the message we send.
-*/
+/// Every COSMIC model must be a struct data type.
+///
+/// Mandatory fields for a COSMIC Applet are `core` and `popup`.
+///   - `core` holds the core settings that allow the applet to interact with
+///     the COSMIC desktop environment.
+///   - `popup` tracks the window ID of the currently open popup so we can
+///     open and close it on demand.
+///
+/// `is_enabled` is our custom field that we will manipulate based on the
+/// messages we send.
 #[derive(Default)]
 pub struct Window {
     core: Core,
-    popup: Option<Id>,
+    popup: Option<window::Id>,
     is_enabled: bool,
 }
 
+/// Messages drive all state changes in a COSMIC applet (Elm architecture).
 #[derive(Clone, Debug)]
 pub enum Message {
-    TogglePopup,         // Mandatory for open and close the applet
-    PopupClosed(Id),     // Mandatory for the applet to know if it's been closed
-    EnableDisable(bool), // Our custom message to update the isEnabled field on the model
+    TogglePopup,         // Open or close the applet popup
+    PopupClosed(window::Id), // The compositor notified us the popup was closed
+    EnableDisable(bool), // Our custom message to flip the is_enabled toggle
 }
 
 impl cosmic::Application for Window {
-    /*
-     *  Executors are a mandatory thing for both COSMIC Applications and Applets.
-     *  They're basically what allows for multi-threaded async operations for things that
-     *  may take too long and block the thread the GUI is running on. This is also where
-     *  Tasks take place.
-     */
+    /// Executors control how async work is scheduled. SingleThreadExecutor is
+    /// sufficient for applets that don't perform heavy background work.
     type Executor = cosmic::SingleThreadExecutor;
-    type Flags = (); // Honestly not sure what these are for.
-    type Message = Message; // These are setting the application messages to our Message enum
-    const APP_ID: &'static str = ID; // This is where we set our const above to the actual ID
 
-    // Setup the immutable core functionality.
+    /// Flags allow passing startup configuration into init(). An applet that
+    /// needs no startup data uses the unit type.
+    type Flags = ();
+
+    /// Wire our Message enum as the application-level message type.
+    type Message = Message;
+
+    /// The unique application ID registered with the COSMIC desktop.
+    const APP_ID: &'static str = ID;
+
+    // --- Core accessors (required) -----------------------------------------
+
     fn core(&self) -> &Core {
         &self.core
     }
 
-    // Set up the mutable core functionality.
     fn core_mut(&mut self) -> &mut Core {
         &mut self.core
     }
 
-    // Initialize the applet
-    /*
-     *  The parameters are the Core and flags (again not sure what to do with these).
-     *  The function returns our model struct initialized and an Option<Task>, in this case
-     *  there is no command so it returns a None value with the type of Task in its place.
-     */
-    fn init(core: Core, _flags: Self::Flags) -> (Self, Task<cosmic::app::Message<Self::Message>>) {
+    // --- Lifecycle ----------------------------------------------------------
+
+    /// Initialize the applet. Returns the model and an optional startup Task.
+    fn init(core: Core, _flags: Self::Flags) -> (Self, app::Task<Self::Message>) {
         let window = Window {
-            core,                 // Set the incoming core
-            is_enabled: false,    // Set out isEnabled field to false to start disabled
-            ..Default::default()  // Set everything else to the default values
+            core,
+            is_enabled: false,
+            ..Default::default()
         };
 
         (window, Task::none())
     }
 
-    // Create what happens when the applet is closed
+    /// Called by the compositor when a window close is requested.
+    /// Returning Some(msg) lets us handle it through update().
     fn on_close_requested(&self, id: window::Id) -> Option<Message> {
-        // Pass the PopupClosed message to the update function
         Some(Message::PopupClosed(id))
     }
 
-    // Here is the update function, it's the one that handles all of the messages that
-    // are passed within the applet.
-    fn update(&mut self, message: Self::Message) -> Task<cosmic::app::Message<Self::Message>> {
-        // match on what message was sent
+    // --- Update (message handler) ------------------------------------------
+
+    /// Process incoming messages and return a Task for any async follow-up
+    /// work. Most simple handlers return Task::none().
+    fn update(&mut self, message: Self::Message) -> app::Task<Self::Message> {
         match message {
-            // Handle the TogglePopup message
             Message::TogglePopup => {
-                // Close the popup
+                // If a popup is already open, destroy it.
                 return if let Some(popup_id) = self.popup.take() {
                     destroy_popup(popup_id)
                 } else {
-                    // Create and "open" the popup
-                    let new_id = Id::unique();
+                    // Create a new popup with a unique window ID.
+                    let new_id = window::Id::unique();
                     self.popup.replace(new_id);
 
+                    // Build the popup settings from the applet core. The three
+                    // Option parameters are: size hint, horizontal offset, and
+                    // vertical offset relative to the panel icon.
                     let mut popup_settings = self.core.applet.get_popup_settings(
                         self.core.main_window_id().unwrap(),
                         new_id,
@@ -105,6 +116,8 @@ impl cosmic::Application for Window {
                         None,
                     );
 
+                    // Constrain the popup size so it looks reasonable on any
+                    // display configuration.
                     popup_settings.positioner.size_limits = Limits::NONE
                         .max_width(372.0)
                         .min_width(300.0)
@@ -114,33 +127,32 @@ impl cosmic::Application for Window {
                     get_popup(popup_settings)
                 };
             }
-            // Unset the popup field after it's been closed
             Message::PopupClosed(popup_id) => {
                 if self.popup.as_ref() == Some(&popup_id) {
                     self.popup = None;
                 }
             }
-            Message::EnableDisable(is_enabled) => self.is_enabled = is_enabled,
+            Message::EnableDisable(is_enabled) => {
+                self.is_enabled = is_enabled;
+            }
         }
-        Task::none() // Again not doing anything that requires multi-threading here.
+        Task::none()
     }
 
-    /*
-     *  For an applet, the view function describes what an applet looks like. There's a
-     *  secondary view function (view_window) that shows the widgets in the popup when it's
-     *  opened.
-     */
-    fn view(&self) -> Element<Self::Message> {
+    // --- Views --------------------------------------------------------------
+
+    /// The panel icon view. This is what the user sees in the COSMIC panel
+    /// before they click on the applet.
+    fn view(&self) -> Element<'_, Self::Message> {
         self.core
             .applet
-            .icon_button("display-symbolic") // Using a default button image
+            .icon_button("display-symbolic")
             .on_press(Message::TogglePopup)
             .into()
     }
 
-    // The actual GUI window for the applet. It's a popup.
-    fn view_window(&self, _id: Id) -> Element<Self::Message> {
-        // A text box to show if we've enabled or disabled anything in the model
+    /// The popup window that appears when the panel icon is clicked.
+    fn view_window(&self, _id: window::Id) -> Element<'_, Self::Message> {
         let content_list = list_column()
             .padding(5)
             .spacing(0)
@@ -157,7 +169,11 @@ impl cosmic::Application for Window {
                 toggler(self.is_enabled).on_toggle(Message::EnableDisable),
             ));
 
-        // Set the widget content list as the popup_container for the applet
         self.core.applet.popup_container(content_list).into()
+    }
+
+    /// Return the applet style so the panel renders our background correctly.
+    fn style(&self) -> Option<iced::theme::Style> {
+        Some(cosmic::applet::style())
     }
 }
